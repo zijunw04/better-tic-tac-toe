@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import io from 'socket.io-client';
 import TicTacToe from './tictactoe';
 
+const SOCKET_SERVER_URL = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || 'http://localhost:3001';
+
 const Lobby = ({ lobbyId }) => {
   const [socket, setSocket] = useState(null);
   const [lobby, setLobby] = useState({
@@ -18,39 +20,36 @@ const Lobby = ({ lobbyId }) => {
   const [selectedPlayers, setSelectedPlayers] = useState([]);
 
   useEffect(() => {
-    const newSocket = io();
+    const newSocket = io(SOCKET_SERVER_URL);
     setSocket(newSocket);
-
+  
+    newSocket.on('connect', () => {
+      console.log('Connected to WebSocket server');
+    });
+  
     newSocket.on('lobbyUpdate', (updatedLobby) => {
       console.log('Lobby updated:', updatedLobby);
       setLobby(updatedLobby);
       setGameStarted(updatedLobby.gameInProgress);
-      if (!updatedLobby.gameInProgress) {
-        setSelectedPlayers([]);
+      // Check if the current user is the owner
+      if (updatedLobby.owner === newSocket.id) {
+        console.log('You are the lobby owner');
       }
     });
-
+  
     newSocket.on('gameStart', (updatedLobby) => {
       console.log('Game started:', updatedLobby);
       setLobby(updatedLobby);
       setGameStarted(true);
     });
-
-    newSocket.on('returnToLobby', () => {
-      setGameStarted(false);
-      setSelectedPlayers([]);
-    });
-
-    return () => {
-      newSocket.off('lobbyUpdate');
-      newSocket.off('gameStart');
-      newSocket.off('returnToLobby');
-      newSocket.close();
-    };
+  
+    return () => newSocket.close();
   }, [lobbyId]);
+  
 
   const joinLobby = () => {
     if (username && socket) {
+      console.log(`Joining lobby ${lobbyId} as ${username}`);
       socket.emit('joinLobby', lobbyId, username);
       setJoined(true);
     }
@@ -73,6 +72,7 @@ const Lobby = ({ lobbyId }) => {
       socket.emit('startGame', lobbyId, selectedPlayers);
     }
   };
+  
 
   const handleReturnToLobby = () => {
     setGameStarted(false);
@@ -107,14 +107,13 @@ const Lobby = ({ lobbyId }) => {
         <ul className="mb-4">
           {lobby.users.map(user => (
             <li key={user.id} className="flex items-center justify-between mb-2">
-              <span>{user.username} {user.isReady ? '(Ready)' : ''}</span>
+              <span>{user.username}</span>
               {socket.id === lobby.owner && (
                 <button
                   onClick={() => togglePlayerSelection(user.id)}
                   className={`px-2 py-1 rounded ${
                     selectedPlayers.includes(user.id) ? 'bg-green-500 text-white' : 'bg-gray-200'
                   }`}
-                  disabled={lobby.gameInProgress}
                 >
                   {selectedPlayers.includes(user.id) ? 'Selected' : 'Select'}
                 </button>
@@ -122,19 +121,18 @@ const Lobby = ({ lobbyId }) => {
             </li>
           ))}
         </ul>
-        {socket.id === lobby.owner && (
+        {socket.id === lobby.owner ? (
           <button
             onClick={startGame}
-            disabled={selectedPlayers.length !== 2 || lobby.gameInProgress}
-            className={`px-4 py-2 rounded ${
-              selectedPlayers.length === 2 && !lobby.gameInProgress ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-600'
+            disabled={selectedPlayers.length !== 2}
+            className={`w-full px-4 py-2 rounded ${
+              selectedPlayers.length === 2 ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-600'
             }`}
           >
             Start Game
           </button>
-        )}
-        {socket.id !== lobby.owner && (
-          <p className="text-gray-600">Waiting for lobby owner to start the game...</p>
+        ) : (
+          <p className="text-center text-gray-600">Waiting for lobby owner to start the game...</p>
         )}
       </div>
     </div>

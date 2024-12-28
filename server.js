@@ -13,7 +13,13 @@ app.prepare().then(() => {
     handle(req, res, parsedUrl);
   });
 
-  const io = new Server(server);
+  const io = new Server(server, {
+    cors: {
+      origin: process.env.CLIENT_URL || "http://localhost:3000",
+      methods: ["GET", "POST"]
+    }
+  });
+  
 
   const lobbies = new Map();
 
@@ -21,8 +27,9 @@ app.prepare().then(() => {
     console.log('Client connected:', socket.id);
   
     socket.on('joinLobby', (lobbyId, username) => {
-      console.log(`User ${username} joining lobby ${lobbyId}`);
+      console.log(`User ${username} (${socket.id}) joining lobby ${lobbyId}`);
       if (!lobbies.has(lobbyId)) {
+        console.log(`Creating new lobby ${lobbyId}`);
         lobbies.set(lobbyId, {
           users: [],
           activePlayers: [],
@@ -32,24 +39,22 @@ app.prepare().then(() => {
           owner: null,
         });
       }
-  
+    
       const lobby = lobbies.get(lobbyId);
-      const user = { id: socket.id, username, isReady: false };
+      const user = { id: socket.id, username };
       
-      if (lobby.gameInProgress) {
-        lobby.spectators.push(user);
-      } else {
-        lobby.users.push(user);
-        if (!lobby.owner) {
-          lobby.owner = socket.id;
-        }
+      lobby.users.push(user);
+      if (!lobby.owner) {
+        console.log(`Setting ${username} (${socket.id}) as lobby owner`);
+        lobby.owner = socket.id;
       }
       
       socket.join(lobbyId);
-  
+    
+      console.log(`Emitting lobbyUpdate for ${lobbyId}:`, lobby);
       io.to(lobbyId).emit('lobbyUpdate', lobby);
     });
-
+    
     socket.on('toggleReady', (lobbyId) => {
       console.log(`Toggle ready in lobby ${lobbyId}`);
       const lobby = lobbies.get(lobbyId);
@@ -64,26 +69,29 @@ app.prepare().then(() => {
       }
     });
 
-    socket.on('startGame', (lobbyId, playerIds) => {
-      console.log(`Starting game in lobby ${lobbyId}`);
+    socket.on('startGame', (lobbyId, selectedPlayers) => {
+      console.log(`Start game requested for lobby ${lobbyId} by ${socket.id}`);
       const lobby = lobbies.get(lobbyId);
       if (!lobby || socket.id !== lobby.owner) {
         console.error('Invalid lobby or not the owner');
         return;
       }
-      lobby.activePlayers = playerIds.map(id => lobby.users.find(u => u.id === id));
-      lobby.spectators = lobby.users.filter(u => !playerIds.includes(u.id));
-      lobby.gameInProgress = true;
       
+      lobby.gameInProgress = true;
+      lobby.activePlayers = selectedPlayers.map(id => lobby.users.find(u => u.id === id));
+      lobby.spectators = lobby.users.filter(u => !selectedPlayers.includes(u.id));
       lobby.gameState = {
         board: Array(9).fill(null),
         currentPlayer: 'X',
         winner: null,
         moveHistory: [],
       };
-  
+    
+      console.log(`Starting game in lobby ${lobbyId}`);
       io.to(lobbyId).emit('gameStart', lobby);
     });
+    
+    
   
     socket.on('makeMove', ({ lobbyId, index }) => {
       console.log(`Received makeMove: lobbyId=${lobbyId}, index=${index}`);
