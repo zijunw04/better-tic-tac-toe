@@ -1,45 +1,42 @@
 'use client'
 import { useEffect, useState } from 'react';
 
-const TicTacToe = ({ lobbyId, socket, lobby, onReturnToLobby }) => {
+const TicTacToe = ({ lobbyId, playerId, lobby, onReturnToLobby }) => {
   const [gameState, setGameState] = useState(lobby.gameState);
   const [playerSymbol, setPlayerSymbol] = useState(null);
 
   useEffect(() => {
-    console.log('TicTacToe component mounted. LobbyId:', lobbyId);
-
-    // Determine the player's symbol
-    const player = lobby.activePlayers.find(p => p.id === socket.id);
+    const player = lobby.activePlayers.find(p => p.id === playerId);
     setPlayerSymbol(player ? (lobby.activePlayers.indexOf(player) === 0 ? 'X' : 'O') : null);
 
-    socket.on('gameUpdate', (updatedLobby) => {
-      console.log('Received game update:', updatedLobby);
-      setGameState(updatedLobby.gameState);
-    });
-
-    socket.on('returnToLobby', () => {
-      onReturnToLobby();
-    });
-
-    return () => {
-      socket.off('gameUpdate');
-      socket.off('returnToLobby');
+    const pollGameState = async () => {
+      const response = await fetch(`/api/lobby?lobbyId=${lobbyId}`);
+      if (response.ok) {
+        const updatedLobby = await response.json();
+        setGameState(updatedLobby.gameState);
+      }
     };
-  }, [socket, lobbyId, onReturnToLobby, lobby.activePlayers]);
 
-  const makeMove = (index) => {
-    console.log(`Attempting move: lobbyId=${lobbyId}, index=${index}, currentPlayer=${gameState?.currentPlayer}`);
-    if (socket && gameState && gameState.board[index] === null && !gameState.winner && gameState.currentPlayer === playerSymbol) {
-      socket.emit('makeMove', { lobbyId, index });
-    } else {
-      console.log('Invalid move attempt');
+    const intervalId = setInterval(pollGameState, 1000);
+    return () => clearInterval(intervalId);
+  }, [lobbyId, playerId, lobby.activePlayers]);
+
+  const makeMove = async (index) => {
+    if (gameState && gameState.board[index] === null && !gameState.winner && gameState.currentPlayer === playerSymbol) {
+      const response = await fetch('/api/lobby', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'makeMove', lobbyId, playerId, index }),
+      });
+      if (response.ok) {
+        const updatedLobby = await response.json();
+        setGameState(updatedLobby.gameState);
+      }
     }
   };
 
-  const rematch = () => {
-    if (socket) {
-      socket.emit('rematch', lobbyId);
-    }
+  const rematch = async () => {
+    await onReturnToLobby();
   };
 
   const getCellStyle = (value) => {

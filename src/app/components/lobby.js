@@ -1,10 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react';
-import io from 'socket.io-client';
 import TicTacToe from './tictactoe';
 
 const Lobby = ({ lobbyId }) => {
-  const [socket, setSocket] = useState(null);
   const [lobby, setLobby] = useState({
     users: [],
     activePlayers: [],
@@ -14,73 +12,76 @@ const Lobby = ({ lobbyId }) => {
   });
   const [username, setUsername] = useState('');
   const [joined, setJoined] = useState(false);
-  const [gameStarted, setGameStarted] = useState(false);
-  const [selectedPlayers, setSelectedPlayers] = useState([]);
+  const [playerId, setPlayerId] = useState(null);
 
   useEffect(() => {
-    const socketServerUrl = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || 
-      (process.env.NODE_ENV === 'production' 
-        ? 'https://better-tic-tac-toe.vercel.app' 
-        : 'http://localhost:3000');
-    
-    const newSocket = io(socketServerUrl, {
-      withCredentials: true,
-    });
-    setSocket(newSocket);
-  
-    newSocket.on('connect', () => {
-      console.log('Connected to WebSocket server');
-    });
-  
-    newSocket.on('lobbyUpdate', (updatedLobby) => {
-      console.log('Lobby updated:', updatedLobby);
-      setLobby(updatedLobby);
-      setGameStarted(updatedLobby.gameInProgress);
-      // Check if the current user is the owner
-      if (updatedLobby.owner === newSocket.id) {
-        console.log('You are the lobby owner');
+    const pollLobby = async () => {
+      const response = await fetch(`/api/lobby?lobbyId=${lobbyId}`);
+      if (response.ok) {
+        const updatedLobby = await response.json();
+        setLobby(updatedLobby);
       }
-    });
-  
-    newSocket.on('gameStart', (updatedLobby) => {
-      console.log('Game started:', updatedLobby);
-      setLobby(updatedLobby);
-      setGameStarted(true);
-    });
-  
-    return () => newSocket.close();
-  }, [lobbyId]);
-  
+    };
 
-  const joinLobby = () => {
-    if (username && socket) {
-      console.log(`Joining lobby ${lobbyId} as ${username}`);
-      socket.emit('joinLobby', lobbyId, username);
-      setJoined(true);
+    if (joined) {
+      const intervalId = setInterval(pollLobby, 1000);
+      return () => clearInterval(intervalId);
+    }
+  }, [lobbyId, joined]);
+
+  const joinLobby = async () => {
+    if (username) {
+      const response = await fetch('/api/lobby', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'joinLobby', lobbyId, username }),
+      });
+      if (response.ok) {
+        const { lobby: updatedLobby, playerId: newPlayerId } = await response.json();
+        setLobby(updatedLobby);
+        setPlayerId(newPlayerId);
+        setJoined(true);
+      }
     }
   };
 
-  const togglePlayerSelection = (userId) => {
-    if (socket.id !== lobby.owner) return;
-    setSelectedPlayers(prev => {
-      if (prev.includes(userId)) {
-        return prev.filter(id => id !== userId);
-      } else if (prev.length < 2) {
-        return [...prev, userId];
-      }
-      return prev;
+  const togglePlayerSelection = async (userId) => {
+    if (playerId !== lobby.owner) return;
+    const response = await fetch('/api/lobby', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'togglePlayerSelection', lobbyId, playerId: userId }),
     });
-  };
-
-  const startGame = () => {
-    if (socket && selectedPlayers.length === 2 && socket.id === lobby.owner) {
-      socket.emit('startGame', lobbyId, selectedPlayers);
+    if (response.ok) {
+      const updatedLobby = await response.json();
+      setLobby(updatedLobby);
     }
   };
-  
 
-  const handleReturnToLobby = () => {
-    setGameStarted(false);
+  const startGame = async () => {
+    if (playerId === lobby.owner && lobby.activePlayers.length === 2) {
+      const response = await fetch('/api/lobby', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'startGame', lobbyId }),
+      });
+      if (response.ok) {
+        const updatedLobby = await response.json();
+        setLobby(updatedLobby);
+      }
+    }
+  };
+
+  const handleReturnToLobby = async () => {
+    const response = await fetch('/api/lobby', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'rematch', lobbyId }),
+    });
+    if (response.ok) {
+      const updatedLobby = await response.json();
+      setLobby(updatedLobby);
+    }
   };
 
   if (!joined) {
@@ -100,8 +101,8 @@ const Lobby = ({ lobbyId }) => {
     );
   }
 
-  if (gameStarted) {
-    return <TicTacToe lobbyId={lobbyId} socket={socket} lobby={lobby} onReturnToLobby={handleReturnToLobby} />;
+  if (lobby.gameInProgress) {
+    return <TicTacToe lobbyId={lobbyId} playerId={playerId} lobby={lobby} onReturnToLobby={handleReturnToLobby} />;
   }
 
   return (
@@ -113,25 +114,25 @@ const Lobby = ({ lobbyId }) => {
           {lobby.users.map(user => (
             <li key={user.id} className="flex items-center justify-between mb-2">
               <span>{user.username}</span>
-              {socket.id === lobby.owner && (
+              {playerId === lobby.owner && (
                 <button
                   onClick={() => togglePlayerSelection(user.id)}
                   className={`px-2 py-1 rounded ${
-                    selectedPlayers.includes(user.id) ? 'bg-green-500 text-white' : 'bg-gray-200'
+                    lobby.activePlayers.some(p => p.id === user.id) ? 'bg-green-500 text-white' : 'bg-gray-200'
                   }`}
                 >
-                  {selectedPlayers.includes(user.id) ? 'Selected' : 'Select'}
+                  {lobby.activePlayers.some(p => p.id === user.id) ? 'Selected' : 'Select'}
                 </button>
               )}
             </li>
           ))}
         </ul>
-        {socket.id === lobby.owner ? (
+        {playerId === lobby.owner ? (
           <button
             onClick={startGame}
-            disabled={selectedPlayers.length !== 2}
+            disabled={lobby.activePlayers.length !== 2}
             className={`w-full px-4 py-2 rounded ${
-              selectedPlayers.length === 2 ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-600'
+              lobby.activePlayers.length === 2 ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-600'
             }`}
           >
             Start Game
