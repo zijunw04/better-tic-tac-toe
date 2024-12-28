@@ -15,12 +15,14 @@ app.prepare().then(() => {
 
   const io = new Server(server, {
     cors: {
-      origin: process.env.CLIENT_URL || "http://localhost:3000",
-      methods: ["GET", "POST"]
+      origin: [
+        "http://localhost:3000",
+        "https://better-tic-tac-toe.vercel.app",
+      ],
+      methods: ["GET", "POST"],
+      credentials: true
     }
   });
-  
-
   const lobbies = new Map();
 
   io.on('connection', (socket) => {
@@ -173,11 +175,13 @@ app.prepare().then(() => {
     });
   });
 
-  server.listen(3000, (err) => {
+  const port = process.env.PORT || 3000;
+  server.listen(port, (err) => {
     if (err) throw err;
-    console.log('> Ready on http://localhost:3000');
+    console.log(`> Ready on http://localhost:${port}`);
   });
 });
+
 
 function calculateWinner(board) {
   const lines = [

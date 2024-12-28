@@ -3,8 +3,6 @@ import { useEffect, useState } from 'react';
 import io from 'socket.io-client';
 import TicTacToe from './tictactoe';
 
-const SOCKET_SERVER_URL = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || 'http://localhost:3001';
-
 const Lobby = ({ lobbyId }) => {
   const [socket, setSocket] = useState(null);
   const [lobby, setLobby] = useState({
@@ -20,7 +18,14 @@ const Lobby = ({ lobbyId }) => {
   const [selectedPlayers, setSelectedPlayers] = useState([]);
 
   useEffect(() => {
-    const newSocket = io(SOCKET_SERVER_URL);
+    const socketServerUrl = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || 
+      (process.env.NODE_ENV === 'production' 
+        ? 'https://better-tic-tac-toe.vercel.app' 
+        : 'http://localhost:3000');
+    
+    const newSocket = io(socketServerUrl, {
+      withCredentials: true,
+    });
     setSocket(newSocket);
   
     newSocket.on('connect', () => {
